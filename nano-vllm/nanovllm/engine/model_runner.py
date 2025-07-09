@@ -1,6 +1,5 @@
 import pickle
 import torch
-from torch.cuda import temperature
 import torch.distributed as dist
 from multiprocessing.synchronize import Event
 from multiprocessing.shared_memory import SharedMemory
@@ -43,7 +42,7 @@ class ModelRunner:
 
         if self.world_size > 1:
             if rank == 0:
-                self.shm = SharedMemory(name="nanovllm", create=True, size=2 * 20)
+                self.shm = SharedMemory(name="nanovllm", create=True, size=2 ** 20)
                 dist.barrier()
             else:
                 dist.barrier()
@@ -117,8 +116,9 @@ class ModelRunner:
             2
             * hf_config.num_hidden_layers
             * self.block_size
+            * num_kv_heads
             * hf_config.head_dim
-            * hf_config.torch.dtype.itemsize
+            * hf_config.torch_dtype.itemsize
         )
         config.num_kvcache_blocks = (
             int(total * config.gpu_memory_utilization - used - peak + current)
@@ -130,41 +130,15 @@ class ModelRunner:
             hf_config.num_hidden_layers,
             config.num_kvcache_blocks,
             self.block_size,
+            num_kv_heads,
+            hf_config.head_dim,
         )
-
-    def prepare_decode(self, seqs: list[Sequence]):
-
-        input_ids = []
-        positions = []
-        slot_mapping = []
-        context_lens = []
-        for seq in seqs:
-            input_ids.append(seq.last_token)
-            positions.append(len(seq))
-            context_lens.append(len(seq))
-            slot_mapping.append(
-                seq.block_table[-1] * self.block_size + seq.last_block_num_tokens - 1
-            )
-        input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(
-            non_blocking=True
-        )
-        positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(
-            non_blocking=True
-        )
-        slot_mapping = torch.tensor(
-            slot_mapping, dtype=torch.int32, pin_memory=True
-        ).cuda(non_blocking=True)
-        context_lens = torch.tensor(
-            context_lens, dtype=torch.int32, pin_memory=True
-        ).cuda(non_blocking=True)
-        block_tables = self.prepare_block_tables(seqs)
-        set_context(
-            False,
-            slot_mapping=slot_mapping,
-            context_lens=context_lens,
-            block_tables=block_tables,
-        )
-        return input_ids, positions
+        layer_id = 0
+        for module in self.model.modules():
+            if hasattr(module, "k_cache") and hasattr(module, "v_cache"):
+                module.k_cache = self.kv_cache[0, layer_id]
+                module.v_cache = self.kv_cache[1, layer_id]
+                layer_id += 1
 
     def prepare_block_tables(self, seqs: list[Sequence]):
         max_len = max(len(seq.block_table) for seq in seqs)
@@ -288,7 +262,7 @@ class ModelRunner:
             graph_vars = self.graph_vars
             for k, v in graph_vars.items():
                 if k != "outputs":
-                    v.zeros_()
+                    v.zero_()
             graph_vars["input_ids"][:bs] = input_ids
             graph_vars["positions"][:bs] = positions
             graph_vars["slot_mapping"][:bs] = context.slot_mapping
@@ -303,10 +277,10 @@ class ModelRunner:
         input_ids, positions = (
             self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
         )
-        temperature = self.prepare_sample(seqs) if self.rank == 0 else None
+        temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         logits = self.run_model(input_ids, positions, is_prefill)
         token_ids = (
-            self.sampler(logits, temperature).tolist() if self.rank == 0 else None
+            self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
         )
         reset_context()
         return token_ids
@@ -340,6 +314,7 @@ class ModelRunner:
                 outputs[:bs] = self.model(input_ids[:bs], positions[:bs])
             if self.graph_pool is None:
                 self.graph_pool = graph.pool()
+            self.graphs[bs] = graph
             torch.cuda.synchronize()
             reset_context()
 

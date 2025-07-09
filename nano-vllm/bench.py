@@ -4,6 +4,7 @@ from random import randint, seed
 
 from torch.cuda import temperature
 from nanovllm import LLM, SamplingParams
+# from vllm import LLM, SamplingParams
 
 
 def main():
@@ -32,7 +33,7 @@ def main():
     llm.generate(["Benchmark: "], SamplingParams())
     t = time.time()
     llm.generate(prompt_token_ids, sampling_params, use_tqdm=False)
-    t = time.time() - t
+    t = (time.time() - t)
     total_tokens = sum(sp.max_tokens for sp in sampling_params)
     throughput = total_tokens / t
     print(

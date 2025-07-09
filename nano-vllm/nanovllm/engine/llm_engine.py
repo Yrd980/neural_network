@@ -71,7 +71,7 @@ class LLMEngine:
         for prompt, sp in zip(prompts, sampling_params):
             self.add_request(prompt, sp)
         outputs = {}
-        prefill_throughput = decode_throughput = 0.0
+        prefill_throughput = decode_throughput = 0.
         while not self.is_finished():
             t = perf_counter()
             output, num_tokens = self.step()

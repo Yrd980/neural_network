@@ -4,9 +4,9 @@ import torch.nn.functional as F
 import torch.distributed as dist
 
 
-def divide(numerator, demoninator):
-    assert numerator % demoninator == 0
-    return numerator // demoninator
+def divide(numerator, denominator):
+    assert numerator % denominator == 0
+    return numerator // denominator
 
 
 class LinearBase(nn.Module):
@@ -125,7 +125,7 @@ class QKVParallelLinear(ColumnParallelLinear):
             shard_offset = (
                 self.num_heads * self.head_size + self.num_kv_heads * self.head_size
             )
-        param_data = param.data.narrow(self.tp_dim, shard_offset, shard_size)
+        param_data = param_data.narrow(self.tp_dim, shard_offset, shard_size)
         loaded_weight = loaded_weight.chunk(self.tp_size, self.tp_dim)[self.tp_rank]
         param_data.copy_(loaded_weight)
 
@@ -134,15 +134,15 @@ class RowParallelLinear(LinearBase):
 
     def __init__(self, input_size: int, output_size: int, bias: bool = False):
         super().__init__(input_size, output_size, 1)
-        self.input_size_per_partition = input_size
-        self.output_size_per_partition = divide(output_size, self.tp_size)
+        self.input_size_per_partition = divide(input_size, self.tp_size)
+        self.output_size_per_partition = output_size
 
         self.weight = nn.Parameter(
             torch.empty(self.output_size, self.input_size_per_partition)
         )
         self.weight.weight_loader = self.weight_loader
         if bias:
-            self.bias = nn.Parameter(torch.empty(self.output_size_per_partition))
+            self.bias = nn.Parameter(torch.empty(self.output_size))
             self.bias.weight_loader = self.weight_loader
         else:
             self.register_parameter("bias", None)

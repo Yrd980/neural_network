@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 import torch.distributed as dist
-from torchvision.ops.boxes import box_iou
 from transformers import Qwen3Config
 
 from nanovllm.layers.activation import SiluAndMul
@@ -89,6 +88,7 @@ class Qwen3Attention(nn.Module):
 
 
 class Qwen3MLP(nn.Module):
+
     def __init__(
         self, hidden_size: int, intermediate_size: int, hidden_act: str
     ) -> None:
@@ -172,7 +172,7 @@ class Qwen3Model(nn.Module):
 
 class Qwen3ForCausalLM(nn.Module):
 
-    packed_model_mapping = {
+    packed_modules_mapping = {
         "q_proj": ("qkv_proj", "q"),
         "k_proj": ("qkv_proj", "k"),
         "v_proj": ("qkv_proj", "v"),
@@ -180,7 +180,7 @@ class Qwen3ForCausalLM(nn.Module):
         "up_proj": ("gate_up_proj", 1),
     }
 
-    def __init__(self, config: Qwen3Config):
+    def __init__(self, config: Qwen3Config) -> None:
         super().__init__()
         self.model = Qwen3Model(config)
         self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size)

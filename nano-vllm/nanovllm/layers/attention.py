@@ -48,7 +48,7 @@ def store_kvcache(
 
 
 class Attention(nn.Module):
-    def __init(self, num_heads, head_dim, scale, num_kv_heads):
+    def __init__(self, num_heads, head_dim, scale, num_kv_heads):
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = head_dim
